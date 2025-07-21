@@ -439,7 +439,7 @@ void EepromSetRangingDefaultSettings( void )
 
 void EepromSetDefaultSettings( void )
 {
-    Eeprom.EepromData.MenuSettings.ScreenCalibrated = false;
+    Eeprom.EepromData.MenuSettings.ScreenCalibrated = true;
 
 #ifdef PRINT_DEBUG
     printf("Set Default Settings\n\r");
