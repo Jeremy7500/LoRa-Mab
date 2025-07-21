@@ -233,9 +233,17 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     static uint8_t successfulExchanges = 0;
     static bool sfChangeRequested = false;
     static bool sfChangeConfirmed = false;
+    static uint32_t lastSequenceNumberReceived = 0;
+    static uint32_t expectedMasterSequence = 0;
     
     // Constantes pour le contrôle du changement de SF
     const uint8_t EXCHANGES_BEFORE_SF_CHANGE = 4;
+    // Format du paquet optimisé - 1 seul octet de contrôle:
+    // Bit 0: 0 = PING, 1 = PONG
+    // Bit 1: 1 = Demande ou confirmation de changement SF
+    const uint8_t MSG_TYPE_PING = 0x00;
+    const uint8_t MSG_TYPE_PONG = 0x01;
+    const uint8_t SF_CHANGE_BIT = 0x02;
 
     if (Eeprom.EepromData.DemoSettings.HoldDemo == true)
     {
@@ -244,19 +252,21 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
 
     if (DemoRunning == false)
     {
-        // Initialisation similaire à RunDemoApplicationPingPong
         DemoRunning = true;
         TX_LED = 0;
         RX_LED = 0;
         SetAntennaSwitch();
         ReceiveNext = false;
         SendNext = false;
+        
+        // Initialiser les compteurs et variables
         Eeprom.EepromData.DemoSettings.CntPacketTx = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxOK = 0;
-        Eeprom.EepromData.DemoSettings.CntPacketRxOKSlave = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxKO = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave = 0;
         Eeprom.EepromData.DemoSettings.RxTimeOutCount = 0;
+        lastSequenceNumberReceived = 0;
+        expectedMasterSequence = 0;
         
         // Réinitialiser les variables pour l'adaptation du SF
         successfulExchanges = 0;
@@ -265,8 +275,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         
         InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
         Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
-
-
+        
         if (Eeprom.EepromData.DemoSettings.Entity == MASTER)
         {
             DemoInternalState = SEND_PING_MSG;
@@ -274,7 +283,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         }
         else
         {
-            // Configuration esclave similaire à RunDemoApplicationPingPong
             IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
             Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
             RX_LED = !RX_LED;
@@ -291,35 +299,26 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         switch (DemoInternalState)
         {
             case SEND_PING_MSG:
-                // Code similaire à RunDemoApplicationPingPong avec modifications
                 if (SendNext == true)
                 {
                     SendNext = false;
                     DemoInternalState = APP_IDLE;
-                    Eeprom.EepromData.DemoSettings.CntPacketTx++;
+                    Eeprom.EepromData.DemoSettings.CntPacketTx++; // Uniquement pour l'affichage
                     
-                    // Préparer le PING
-                    Buffer[0] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 24) & 0xFF;
-                    Buffer[1] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 16) & 0xFF;
-                    Buffer[2] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 8) & 0xFF;
-                    Buffer[3] = Eeprom.EepromData.DemoSettings.CntPacketTx & 0xFF;
+                    // Premier octet = octet de contrôle
+                    Buffer[0] = MSG_TYPE_PING; // PING
                     
-                    // Si un changement de SF est demandé, ajouter un marqueur dans le paquet
-                    // en utilisant un octet après les données de PING normales
+                    // Si un changement de SF est demandé, ajouter un bit dans l'octet de contrôle
                     if (sfChangeRequested && !sfChangeConfirmed)
                     {
-                        Buffer[4] = 0xAA; // Marqueur de demande de changement SF
-                    }
-                    else
-                    {
-                        Buffer[4] = 0x00; // Pas de changement de SF
+                        Buffer[0] |= SF_CHANGE_BIT;
                     }
                     
-                    // Continuer avec le reste du PING
-                    Buffer[5] = PingMsg[0];
-                    Buffer[6] = PingMsg[1];
-                    Buffer[7] = PingMsg[2];
-                    Buffer[8] = PingMsg[3];
+                    // À partir de l'octet 1, remplir avec des données utiles
+                    for (uint8_t i = 1; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
+                    {
+                        Buffer[i] = i; // Données de test
+                    }
                     
                     // Envoyer le paquet
                     TX_LED = !TX_LED;
@@ -332,14 +331,12 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 break;
                 
             case APP_TX:
-                // Code similaire à RunDemoApplicationPingPong
                 DemoInternalState = SEND_PING_MSG;
                 TX_LED = !TX_LED;
                 RX_LED = !RX_LED;
                 IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
                 Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
-                
-                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE,Eeprom.EepromData.DemoSettings.TimeOnAir + RX_TX_TRANSITION_WAIT});
+                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, Eeprom.EepromData.DemoSettings.TimeOnAir + RX_TX_TRANSITION_WAIT});
                 break;
                 
             case APP_RX:
@@ -348,60 +345,54 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
                 Radio.GetPacketStatus(&PacketStatus);
                 
-                // Vérifier si le PONG contient une confirmation de changement de SF
-                if (Buffer[4] == 0xBB) // Confirmation de changement de SF
+                // Vérifier si le message est un PONG
+                if (BufferSize > 0 && (Buffer[0] & MSG_TYPE_PONG))
                 {
-                    sfChangeConfirmed = true;
-                    
-                    // Changer le SF
-                    if (Eeprom.EepromData.DemoSettings.ModulationParam1 > LORA_SF5)
+                    // Vérifier la confirmation de changement de SF dans l'octet de contrôle
+                    if (Buffer[0] & SF_CHANGE_BIT)
                     {
-                        Eeprom.EepromData.DemoSettings.ModulationParam1 -= 0x10; // Diminuer le SF
+                        sfChangeConfirmed = true;
                         
-                        // Sauvegarder et appliquer les nouveaux paramètres
-                        EepromSaveSettings(RADIO_LORA_PARAMS);
-                        EepromSaveSettings(DEMO_SETTINGS);
-                        
-                        // Réinitialiser les paramètres radio avec le nouveau SF
-                        InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
-                        Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
+                        // Changer le SF
+                        if (Eeprom.EepromData.DemoSettings.ModulationParam1 > LORA_SF5)
+                        {
+                            Eeprom.EepromData.DemoSettings.ModulationParam1 -= 0x10; // Diminuer le SF
+                            
+                            // Sauvegarder et appliquer les nouveaux paramètres
+                            EepromSaveSettings(RADIO_LORA_PARAMS);
+                            EepromSaveSettings(DEMO_SETTINGS);
+                            
+                            // Réinitialiser les paramètres radio avec le nouveau SF
+                            InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
+                            Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
 
-                        // AJOUT: Mettre à jour le timer avec la nouvelle valeur TimeOnAir
-                        SendNextPacket.detach(); // Détacher l'ancien timer
-                        SendNextPacket.attach_us(&SendNextPacketEvent, ((uint32_t)((Eeprom.EepromData.DemoSettings.TimeOnAir * 2) + 
-                                                RX_TX_INTER_PACKET_DELAY * 2) * 1000));
+                            // Mettre à jour le timer avec la nouvelle valeur TimeOnAir
+                            SendNextPacket.detach();
+                            SendNextPacket.attach_us(&SendNextPacketEvent, ((uint32_t)((Eeprom.EepromData.DemoSettings.TimeOnAir * 2) + 
+                                                  RX_TX_INTER_PACKET_DELAY * 2) * 1000));
+                            
+                            // Mettre à jour l'affichage
+                            char StringText[MAX_CHAR_PER_LINE + 1];
+                            sprintf(StringText, "%s: %s", GetMenuRadioFrameType(), 
+                                    GetRadioModulationParameters1());
+                            DrawText(LINE1_TEXT, (uint8_t*)StringText, NULL, NULL);
+                        }
                         
-                        // Mettre à jour l'affichage
-                        char StringText[MAX_CHAR_PER_LINE + 1];
-                        sprintf(StringText, "%s: %s", GetMenuRadioFrameType(), 
-                                GetRadioModulationParameters1());
-                        DrawText(LINE1_TEXT, (uint8_t*)StringText, NULL, NULL);
+                        // Réinitialiser les compteurs d'échanges
+                        successfulExchanges = 0;
+                        sfChangeRequested = false;
                     }
                     
-                    // Réinitialiser les compteurs d'échanges
-                    successfulExchanges = 0;
-                    sfChangeRequested = false;
-                }
-                
-                // Traitement normal du PONG
-                if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
-                {
-                    Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
-                    Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
-                }
-                
-                if((BufferSize >= PINGPONG_SIZE) && Buffer[8] == 'P' && Buffer[9] == 'O')
-                {
-                    // Extraire d'abord le compteur d'erreurs
-                    uint16_t slaveErrorCount = ((uint16_t)Buffer[10] << 8) | Buffer[11];
+                    // Traitement des statistiques et RSSI
+                    if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
+                    {
+                        Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
+                        Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
+                    }
                     
-                    // Appeler ensuite ComputePingPongPayload qui fait les autres traitements
-                    ComputePingPongPayload(Buffer, BufferSize);
-                    
-                    // Restaurer notre valeur extraite (au cas où elle serait modifiée par ComputePingPongPayload)
-                    Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave = slaveErrorCount;
                     // Incrémenter le compteur d'échanges réussis
                     successfulExchanges++;
+                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
                     
                     // Vérifier si on doit demander un changement de SF
                     if (successfulExchanges >= EXCHANGES_BEFORE_SF_CHANGE && 
@@ -412,21 +403,19 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                         sfChangeConfirmed = false;
                     }
                 }
-                else
-                {
-                    Eeprom.EepromData.DemoSettings.CntPacketRxKO++;
-                }
                 
                 DemoInternalState = SEND_PING_MSG;
                 refreshDisplay = 1;
                 break;
                 
-            // Autres cas (timeout, erreurs, etc.) similaires à RunDemoApplicationPingPong
+            // Gestion des cas d'erreur et timeout
             case APP_RX_TIMEOUT:
             case APP_RX_ERROR:
                 Radio.SetStandby(STDBY_RC);
                 RX_LED = !RX_LED;
+                // Incrémenter le compteur de paquets perdus (KO)
                 Eeprom.EepromData.DemoSettings.CntPacketRxKO++;
+                Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
                 DemoInternalState = SEND_PING_MSG;
                 refreshDisplay = 1;
                 break;
@@ -439,28 +428,22 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         {
             case SEND_PONG_MSG:
                 wait_ms(2);
+                DemoInternalState = APP_IDLE;
                 
-                // Préparation du PONG
-                Buffer[0] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 24) & 0xFF;
-                Buffer[1] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 16) & 0xFF;
-                Buffer[2] = (Eeprom.EepromData.DemoSettings.CntPacketTx >> 8) & 0xFF;
-                Buffer[3] = Eeprom.EepromData.DemoSettings.CntPacketTx & 0xFF;
+                // Premier octet = octet de contrôle
+                Buffer[0] = MSG_TYPE_PONG; // PONG
                 
                 // Si un changement de SF a été demandé par le maître, confirmer
                 if (sfChangeRequested)
                 {
-                    Buffer[4] = 0xBB; // Confirmation du changement de SF
-                }
-                else
-                {
-                    Buffer[4] = 0x00; // Pas de changement de SF
+                    Buffer[0] |= SF_CHANGE_BIT;
                 }
                 
-                // Suite du PONG
-                Buffer[8] = PongMsg[0];
-                Buffer[9] = PongMsg[1];
-                Buffer[10] = (Eeprom.EepromData.DemoSettings.CntPacketRxKO >> 8) & 0xFF;
-                Buffer[11] = Eeprom.EepromData.DemoSettings.CntPacketRxKO & 0xFF;
+                // À partir de l'octet 1, remplir avec des données utiles
+                for (uint8_t i = 1; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
+                {
+                    Buffer[i] = i + 0x80; // Données différentes du master
+                }
                 
                 // Envoyer le PONG
                 TX_LED = !TX_LED;
@@ -469,7 +452,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 Radio.SendPayload(Buffer, Eeprom.EepromData.DemoSettings.PayloadLength,
                                 (TickTime_t){RX_TIMEOUT_TICK_SIZE,
                                 Eeprom.EepromData.DemoSettings.TimeOnAir + RX_TX_TRANSITION_WAIT});
-                DemoInternalState = APP_IDLE;
                 break;
                 
             case APP_TX:
@@ -494,8 +476,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                         sprintf(StringText, "%s: %s", GetMenuRadioFrameType(), 
                                 GetRadioModulationParameters1());
                         DrawText(LINE1_TEXT, (uint8_t*)StringText, NULL, NULL);
-                        
-                        printf("SF changed to %s\n\r", GetRadioModulationParameters1());
                     }
                     
                     sfChangeRequested = false;
@@ -518,32 +498,61 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 RX_LED = !RX_LED;
                 Radio.SetStandby(STDBY_RC);
                 
-                // Vérifier si le PING contient une demande de changement de SF
+                // Lire le paquet
                 Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
-                if (Buffer[4] == 0xAA) // Demande de changement SF
+                
+                // Vérifier si le message est un PING et s'il y a une demande de changement de SF
+                if (BufferSize > 0 && !(Buffer[0] & MSG_TYPE_PONG))
                 {
-                    sfChangeRequested = true;
-                    sfChangeConfirmed = true;
+                    // Vérifier la demande de changement de SF dans l'octet de contrôle
+                    if (Buffer[0] & SF_CHANGE_BIT)
+                    {
+                        sfChangeRequested = true;
+                        sfChangeConfirmed = true;
+                    }
+                    
+                    // Détection des paquets perdus côté esclave
+                    // En se basant sur la séquence attendue
+                    if (expectedMasterSequence > 0 && 
+                        Eeprom.EepromData.DemoSettings.CntPacketRxOK != expectedMasterSequence)
+                    {
+                        // Calculer combien de paquets ont été perdus
+                        uint32_t missedPackets = expectedMasterSequence - Eeprom.EepromData.DemoSettings.CntPacketRxOK;
+                        if (missedPackets > 0 && missedPackets < 100) // Valeur raisonnable pour éviter les incohérences
+                        {
+                            Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave += missedPackets;
+                        }
+                    }
+                    
+                    expectedMasterSequence = Eeprom.EepromData.DemoSettings.CntPacketRxOK + 1;
+                    
+                    // Traitement des statistiques et RSSI
+                    Radio.GetPacketStatus(&PacketStatus);
+                    if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
+                    {
+                        Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
+                        Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
+                    }
+                    
+                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
                 }
                 
-                // Traitement normal du PING
-                Radio.GetPacketStatus(&PacketStatus);
-                if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
-                {
-                    Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
-                    Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
-                }
-                
-                ComputePingPongPayload(Buffer, BufferSize);
                 DemoInternalState = SEND_PONG_MSG;
                 break;
                 
-            // Autres cas similaires à RunDemoApplicationPingPong
+            // Gestion des cas d'erreur et timeout
             case APP_RX_TIMEOUT:
-                printf("tmt\n\r");
+            case APP_RX_ERROR:
                 Radio.SetStandby(STDBY_RC);
+                // Incrémenter le compteur de paquets perdus (KO) côté esclave
+                Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave++;
                 Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
-                DemoInternalState = SEND_PONG_MSG;
+                DemoInternalState = APP_IDLE;
+                
+                // Attendre le prochain PING
+                IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
+                Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
+                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000});
                 refreshDisplay = 1;
                 break;
         }
@@ -551,7 +560,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     
     return refreshDisplay;
 }
-
 // **************************     RF Test Demo    ******************************
 // *                                                                           *
 // *                                                                           *
