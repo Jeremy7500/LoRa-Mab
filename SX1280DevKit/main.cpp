@@ -57,6 +57,7 @@ int main( )
     PrintCompileSupportMessage();
 
     EepromInit( );
+    EepromFactoryReset( );
 
     if( userButton == 0 )
     {
