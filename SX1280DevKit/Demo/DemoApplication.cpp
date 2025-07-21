@@ -372,10 +372,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                                                   RX_TX_INTER_PACKET_DELAY * 2) * 1000));
                             
                             // Mettre à jour l'affichage
-                            char StringText[MAX_CHAR_PER_LINE + 1];
-                            sprintf(StringText, "%s: %s", GetMenuRadioFrameType(), 
-                                    GetRadioModulationParameters1());
-                            DrawText(LINE1_TEXT, (uint8_t*)StringText, NULL, NULL);
+                            DisplayCurrentRadioParams(PAGE_PING_PONG);
                         }
                         
                         // Réinitialiser les compteurs d'échanges
@@ -472,10 +469,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                         Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
                         
                         // Mettre à jour l'affichage
-                        char StringText[MAX_CHAR_PER_LINE + 1];
-                        sprintf(StringText, "%s: %s", GetMenuRadioFrameType(), 
-                                GetRadioModulationParameters1());
-                        DrawText(LINE1_TEXT, (uint8_t*)StringText, NULL, NULL);
+                        DisplayCurrentRadioParams(PAGE_PING_PONG);
                     }
                     
                     sfChangeRequested = false;
