@@ -227,23 +227,53 @@ void SendNextPacketEvent( void );
 void ReceiveNextPacketEvent( void );
 uint8_t CheckDistance( void );
 
+// Structure pour définir les combinaisons SF/BW
+typedef struct {
+    uint8_t sf;
+    uint8_t bw;
+} SfBwCombination_t;
+
+// Liste des combinaisons SF/BW ordonnées (SF12/BW200 -> SF5/BW1600)
+static const SfBwCombination_t sfBwCombinations[] = {
+    {LORA_SF12, LORA_BW_0200},  // Index 0
+    {LORA_SF12, LORA_BW_0400},  // Index 1
+    {LORA_SF12, LORA_BW_0800},  // Index 2
+    {LORA_SF12, LORA_BW_1600},  // Index 3
+    {LORA_SF9,  LORA_BW_0200},  // Index 4
+    {LORA_SF9,  LORA_BW_0400},  // Index 5
+    {LORA_SF9,  LORA_BW_0800},  // Index 6
+    {LORA_SF9,  LORA_BW_1600},  // Index 7
+    {LORA_SF7,  LORA_BW_0200},  // Index 8
+    {LORA_SF7,  LORA_BW_0400},  // Index 9
+    {LORA_SF7,  LORA_BW_0800},  // Index 10
+    {LORA_SF7,  LORA_BW_1600},  // Index 11
+    {LORA_SF5,  LORA_BW_0200},  // Index 12
+    {LORA_SF5,  LORA_BW_0400},  // Index 13
+    {LORA_SF5,  LORA_BW_0800},  // Index 14
+    {LORA_SF5,  LORA_BW_1600}   // Index 15
+};
+
+#define SF_BW_COMBINATIONS_COUNT (sizeof(sfBwCombinations) / sizeof(SfBwCombination_t))
+
 uint8_t RunDemoApplicationAdaptivePingPong(void)
 {
     uint8_t refreshDisplay = 0;
     static uint8_t successfulExchanges = 0;
-    static bool sfChangeRequested = false;
-    static bool sfChangeConfirmed = false;
+    static bool paramChangeRequested = false;
+    static bool paramChangeConfirmed = false;
     static uint32_t lastSequenceNumberReceived = 0;
     static uint32_t expectedMasterSequence = 0;
+    static uint8_t currentCombinationIndex = 0; // Commence à SF12/BW200
     
-    // Constantes pour le contrôle du changement de SF
-    const uint8_t EXCHANGES_BEFORE_SF_CHANGE = 4;
-    // Format du paquet optimisé - 1 seul octet de contrôle:
-    // Bit 0: 0 = PING, 1 = PONG
-    // Bit 1: 1 = Demande ou confirmation de changement SF
+    // Constantes pour le contrôle du changement de paramètres
+    const uint8_t EXCHANGES_BEFORE_PARAM_CHANGE = 4;
+    // Format du paquet optimisé - 2 octets de contrôle:
+    // Octet 0 - Bit 0: 0 = PING, 1 = PONG
+    // Octet 0 - Bit 1: 1 = Demande ou confirmation de changement de paramètres
+    // Octet 1: Index de la combinaison SF/BW
     const uint8_t MSG_TYPE_PING = 0x00;
     const uint8_t MSG_TYPE_PONG = 0x01;
-    const uint8_t SF_CHANGE_BIT = 0x02;
+    const uint8_t PARAM_CHANGE_BIT = 0x02;
 
     if (Eeprom.EepromData.DemoSettings.HoldDemo == true)
     {
@@ -268,10 +298,22 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         lastSequenceNumberReceived = 0;
         expectedMasterSequence = 0;
         
-        // Réinitialiser les variables pour l'adaptation du SF
+        // Réinitialiser les variables pour l'adaptation des paramètres
         successfulExchanges = 0;
-        sfChangeRequested = false;
-        sfChangeConfirmed = false;
+        paramChangeRequested = false;
+        paramChangeConfirmed = false;
+        currentCombinationIndex = 0; // Commence à SF12/BW200
+        
+        // Appliquer la combinaison initiale SF12/BW200
+        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
+        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+
+        // Sauvegarder et appliquer les nouveaux paramètres
+        EepromSaveSettings(RADIO_LORA_PARAMS);
+        EepromSaveSettings(DEMO_SETTINGS);
+
+        // Mettre à jour l'affichage
+        DisplayCurrentRadioParams(PAGE_PING_PONG);
         
         InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
         Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
@@ -308,14 +350,19 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                     // Premier octet = octet de contrôle
                     Buffer[0] = MSG_TYPE_PING; // PING
                     
-                    // Si un changement de SF est demandé, ajouter un bit dans l'octet de contrôle
-                    if (sfChangeRequested && !sfChangeConfirmed)
+                    // Si un changement de paramètres est demandé, ajouter un bit dans l'octet de contrôle
+                    if (paramChangeRequested && !paramChangeConfirmed)
                     {
-                        Buffer[0] |= SF_CHANGE_BIT;
+                        Buffer[0] |= PARAM_CHANGE_BIT;
+                        Buffer[1] = currentCombinationIndex + 1; // Index de la nouvelle combinaison
+                    }
+                    else
+                    {
+                        Buffer[1] = currentCombinationIndex; // Index actuel
                     }
                     
-                    // À partir de l'octet 1, remplir avec des données utiles
-                    for (uint8_t i = 1; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
+                    // À partir de l'octet 2, remplir avec des données utiles
+                    for (uint8_t i = 2; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
                     {
                         Buffer[i] = i; // Données de test
                     }
@@ -346,23 +393,27 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 Radio.GetPacketStatus(&PacketStatus);
                 
                 // Vérifier si le message est un PONG
-                if (BufferSize > 0 && (Buffer[0] & MSG_TYPE_PONG))
+                if (BufferSize > 1 && (Buffer[0] & MSG_TYPE_PONG))
                 {
-                    // Vérifier la confirmation de changement de SF dans l'octet de contrôle
-                    if (Buffer[0] & SF_CHANGE_BIT)
+                    // Vérifier la confirmation de changement de paramètres dans l'octet de contrôle
+                    if (Buffer[0] & PARAM_CHANGE_BIT)
                     {
-                        sfChangeConfirmed = true;
+                        paramChangeConfirmed = true;
                         
-                        // Changer le SF
-                        if (Eeprom.EepromData.DemoSettings.ModulationParam1 > LORA_SF5)
+                        // Passer à la combinaison suivante
+                        if (currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
                         {
-                            Eeprom.EepromData.DemoSettings.ModulationParam1 -= 0x10; // Diminuer le SF
+                            currentCombinationIndex++;
+                            
+                            // Appliquer la nouvelle combinaison SF/BW
+                            Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
+                            Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
                             
                             // Sauvegarder et appliquer les nouveaux paramètres
                             EepromSaveSettings(RADIO_LORA_PARAMS);
                             EepromSaveSettings(DEMO_SETTINGS);
                             
-                            // Réinitialiser les paramètres radio avec le nouveau SF
+                            // Réinitialiser les paramètres radio avec la nouvelle combinaison
                             InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
                             Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
 
@@ -377,7 +428,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                         
                         // Réinitialiser les compteurs d'échanges
                         successfulExchanges = 0;
-                        sfChangeRequested = false;
+                        paramChangeRequested = false;
                     }
                     
                     // Traitement des statistiques et RSSI
@@ -391,13 +442,13 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                     successfulExchanges++;
                     Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
                     
-                    // Vérifier si on doit demander un changement de SF
-                    if (successfulExchanges >= EXCHANGES_BEFORE_SF_CHANGE && 
-                        !sfChangeRequested && 
-                        Eeprom.EepromData.DemoSettings.ModulationParam1 > LORA_SF5)
+                    // Vérifier si on doit demander un changement de paramètres
+                    if (successfulExchanges >= EXCHANGES_BEFORE_PARAM_CHANGE && 
+                        !paramChangeRequested && 
+                        currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
                     {
-                        sfChangeRequested = true;
-                        sfChangeConfirmed = false;
+                        paramChangeRequested = true;
+                        paramChangeConfirmed = false;
                     }
                 }
                 
@@ -412,7 +463,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 RX_LED = !RX_LED;
                 // Incrémenter le compteur de paquets perdus (KO)
                 Eeprom.EepromData.DemoSettings.CntPacketRxKO++;
-                Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
                 DemoInternalState = SEND_PING_MSG;
                 refreshDisplay = 1;
                 break;
@@ -423,6 +473,14 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     {
         switch (DemoInternalState)
         {
+            case APP_IDLE: // do nothing
+                if(ReceiveNext == true)
+                {
+                    ReceiveNext = false;
+                    DemoInternalState = APP_RX_TIMEOUT;
+                }
+                break;
+
             case SEND_PONG_MSG:
                 wait_ms(2);
                 DemoInternalState = APP_IDLE;
@@ -430,14 +488,15 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 // Premier octet = octet de contrôle
                 Buffer[0] = MSG_TYPE_PONG; // PONG
                 
-                // Si un changement de SF a été demandé par le maître, confirmer
-                if (sfChangeRequested)
+                // Si un changement de paramètres a été demandé par le maître, confirmer
+                if (paramChangeRequested)
                 {
-                    Buffer[0] |= SF_CHANGE_BIT;
+                    Buffer[0] |= PARAM_CHANGE_BIT;
                 }
+                Buffer[1] = currentCombinationIndex; // Index actuel
                 
-                // À partir de l'octet 1, remplir avec des données utiles
-                for (uint8_t i = 1; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
+                // À partir de l'octet 2, remplir avec des données utiles
+                for (uint8_t i = 2; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
                 {
                     Buffer[i] = i + 0x80; // Données différentes du master
                 }
@@ -452,28 +511,32 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 break;
                 
             case APP_TX:
-                // Si un changement de SF a été confirmé, l'appliquer
-                if (sfChangeConfirmed)
+                // Si un changement de paramètres a été confirmé, l'appliquer
+                if (paramChangeConfirmed)
                 {
-                    // Changer le SF
-                    if (Eeprom.EepromData.DemoSettings.ModulationParam1 > LORA_SF5)
-                    {
-                        Eeprom.EepromData.DemoSettings.ModulationParam1 -= 0x10; // Diminuer le SF
+                    // Passer à la combinaison suivante
+                    // if (currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
+                    // {
+                        //currentCombinationIndex++;
+                        
+                        // Appliquer la nouvelle combinaison SF/BW
+                        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
+                        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
                         
                         // Sauvegarder et appliquer les nouveaux paramètres
                         EepromSaveSettings(RADIO_LORA_PARAMS);
                         EepromSaveSettings(DEMO_SETTINGS);
                         
-                        // Réinitialiser les paramètres radio avec le nouveau SF
+                        // Réinitialiser les paramètres radio avec la nouvelle combinaison
                         InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
                         Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
                         
                         // Mettre à jour l'affichage
                         DisplayCurrentRadioParams(PAGE_PING_PONG);
-                    }
+                    //}
                     
-                    sfChangeRequested = false;
-                    sfChangeConfirmed = false;
+                    paramChangeRequested = false;
+                    paramChangeConfirmed = false;
                 }
                 
                 // Configuration normale pour recevoir le prochain PING
@@ -495,14 +558,19 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 // Lire le paquet
                 Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
                 
-                // Vérifier si le message est un PING et s'il y a une demande de changement de SF
-                if (BufferSize > 0 && !(Buffer[0] & MSG_TYPE_PONG))
+                // Vérifier si le message est un PING et s'il y a une demande de changement de paramètres
+                if (BufferSize > 1 && !(Buffer[0] & MSG_TYPE_PONG))
                 {
-                    // Vérifier la demande de changement de SF dans l'octet de contrôle
-                    if (Buffer[0] & SF_CHANGE_BIT)
+                    // Vérifier la demande de changement de paramètres dans l'octet de contrôle
+                    if (Buffer[0] & PARAM_CHANGE_BIT)
                     {
-                        sfChangeRequested = true;
-                        sfChangeConfirmed = true;
+                        uint8_t newCombinationIndex = Buffer[1];
+                        if (newCombinationIndex < SF_BW_COMBINATIONS_COUNT)
+                        {
+                            currentCombinationIndex = newCombinationIndex;
+                            paramChangeRequested = true;
+                            paramChangeConfirmed = true;
+                        }
                     }
                     
                     // Détection des paquets perdus côté esclave
