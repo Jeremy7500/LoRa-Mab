@@ -463,6 +463,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 RX_LED = !RX_LED;
                 // Incrémenter le compteur de paquets perdus (KO)
                 Eeprom.EepromData.DemoSettings.CntPacketRxKO++;
+                Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
                 DemoInternalState = SEND_PING_MSG;
                 refreshDisplay = 1;
                 break;
@@ -473,14 +474,6 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     {
         switch (DemoInternalState)
         {
-            case APP_IDLE: // do nothing
-                if(ReceiveNext == true)
-                {
-                    ReceiveNext = false;
-                    DemoInternalState = APP_RX_TIMEOUT;
-                }
-                break;
-
             case SEND_PONG_MSG:
                 wait_ms(2);
                 DemoInternalState = APP_IDLE;
