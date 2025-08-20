@@ -264,7 +264,9 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     static uint32_t lastSequenceNumberReceived = 0;
     static uint32_t expectedMasterSequence = 0;
     static uint8_t currentCombinationIndex = 0; // Commence à SF12/BW200
-    
+    static uint8_t lastWorkingCombinationIndex = 0;
+    static bool awaitingPingAfterParamChange = false;
+
     // Constantes pour le contrôle du changement de paramètres
     const uint8_t EXCHANGES_BEFORE_PARAM_CHANGE = 4;
     // Format du paquet optimisé - 2 octets de contrôle:
@@ -303,6 +305,8 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         paramChangeRequested = false;
         paramChangeConfirmed = false;
         currentCombinationIndex = 0; // Commence à SF12/BW200
+        lastWorkingCombinationIndex = 0;
+        awaitingPingAfterParamChange = false;
         
         // Appliquer la combinaison initiale SF12/BW200
         Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
@@ -507,93 +511,111 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 // Si un changement de paramètres a été confirmé, l'appliquer
                 if (paramChangeConfirmed)
                 {
-                    // Passer à la combinaison suivante
-                    // if (currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
-                    // {
-                        //currentCombinationIndex++;
-                        
-                        // Appliquer la nouvelle combinaison SF/BW
-                        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
-                        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
-                        
-                        // Sauvegarder et appliquer les nouveaux paramètres
-                        EepromSaveSettings(RADIO_LORA_PARAMS);
-                        EepromSaveSettings(DEMO_SETTINGS);
-                        
-                        // Réinitialiser les paramètres radio avec la nouvelle combinaison
-                        InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
-                        Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
-                        
-                        // Mettre à jour l'affichage
-                        DisplayCurrentRadioParams(PAGE_PING_PONG);
-                    //}
-                    
+                    // Appliquer la nouvelle combinaison SF/BW
+                    Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
+                    Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+
+                    // Sauvegarder et appliquer les nouveaux paramètres
+                    EepromSaveSettings(RADIO_LORA_PARAMS);
+                    EepromSaveSettings(DEMO_SETTINGS);
+
+                    // Réinitialiser les paramètres radio avec la nouvelle combinaison
+                    InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
+                    Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
+
+                    // Mettre à jour l'affichage
+                    DisplayCurrentRadioParams(PAGE_PING_PONG);
+
                     paramChangeRequested = false;
                     paramChangeConfirmed = false;
+                    awaitingPingAfterParamChange = true;
                 }
-                
-                // Configuration normale pour recevoir le prochain PING
+
+                // Configuration pour recevoir le prochain PING
                 DemoInternalState = APP_IDLE;
                 RX_LED = !RX_LED;
                 TX_LED = !TX_LED;
                 IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
                 Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
-                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000});
+                if (awaitingPingAfterParamChange)
+                {
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 2000});
+                }
+                else
+                {
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000});
+                }
                 refreshDisplay = 1;
                 break;
                 
             case APP_RX:
-                // Traitement de la réception du PING
-                DemoInternalState = APP_IDLE;
-                RX_LED = !RX_LED;
-                Radio.SetStandby(STDBY_RC);
-                
-                // Lire le paquet
-                Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
-                
-                // Vérifier si le message est un PING et s'il y a une demande de changement de paramètres
-                if (BufferSize > 1 && !(Buffer[0] & MSG_TYPE_PONG))
+            // Traitement de la réception du PING
+            DemoInternalState = APP_IDLE;
+            RX_LED = !RX_LED;
+            Radio.SetStandby(STDBY_RC);
+            
+            // Lire le paquet
+            Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
+            
+            // Vérifier si le message est un PING et s'il y a une demande de changement de paramètres
+            if (BufferSize > 1 && !(Buffer[0] & MSG_TYPE_PONG))
+            {
+                // Vérifier la demande de changement de paramètres dans l'octet de contrôle
+                if (Buffer[0] & PARAM_CHANGE_BIT)
                 {
-                    // Vérifier la demande de changement de paramètres dans l'octet de contrôle
-                    if (Buffer[0] & PARAM_CHANGE_BIT)
+                    uint8_t newCombinationIndex = Buffer[1];
+                    if (newCombinationIndex < SF_BW_COMBINATIONS_COUNT)
                     {
-                        uint8_t newCombinationIndex = Buffer[1];
-                        if (newCombinationIndex < SF_BW_COMBINATIONS_COUNT)
-                        {
-                            currentCombinationIndex = newCombinationIndex;
-                            paramChangeRequested = true;
-                            paramChangeConfirmed = true;
-                        }
+                        // CORRECTION : Sauvegarder l'index actuel AVANT de le changer
+                        lastWorkingCombinationIndex = currentCombinationIndex;
+                        currentCombinationIndex = newCombinationIndex;
+                        paramChangeRequested = true;
+                        paramChangeConfirmed = true;
                     }
-                    
-                    // Détection des paquets perdus côté esclave
-                    // En se basant sur la séquence attendue
-                    if (expectedMasterSequence > 0 && 
-                        Eeprom.EepromData.DemoSettings.CntPacketRxOK != expectedMasterSequence)
-                    {
-                        // Calculer combien de paquets ont été perdus
-                        uint32_t missedPackets = expectedMasterSequence - Eeprom.EepromData.DemoSettings.CntPacketRxOK;
-                        if (missedPackets > 0 && missedPackets < 100) // Valeur raisonnable pour éviter les incohérences
-                        {
-                            Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave += missedPackets;
-                        }
-                    }
-                    
-                    expectedMasterSequence = Eeprom.EepromData.DemoSettings.CntPacketRxOK + 1;
-                    
-                    // Traitement des statistiques et RSSI
-                    Radio.GetPacketStatus(&PacketStatus);
-                    if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
-                    {
-                        Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
-                        Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
-                    }
-                    
-                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
+                }
+                else
+                {
+                    // AJOUT : Si pas de changement de paramètres demandé, 
+                    // mettre à jour lastWorkingCombinationIndex car la communication fonctionne
+                    lastWorkingCombinationIndex = currentCombinationIndex;
                 }
                 
-                DemoInternalState = SEND_PONG_MSG;
-                break;
+                // Détection des paquets perdus côté esclave
+                // En se basant sur la séquence attendue
+                if (expectedMasterSequence > 0 && 
+                    Eeprom.EepromData.DemoSettings.CntPacketRxOK != expectedMasterSequence)
+                {
+                    // Calculer combien de paquets ont été perdus
+                    uint32_t missedPackets = expectedMasterSequence - Eeprom.EepromData.DemoSettings.CntPacketRxOK;
+                    if (missedPackets > 0 && missedPackets < 100) // Valeur raisonnable pour éviter les incohérences
+                    {
+                        Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave += missedPackets;
+                    }
+                }
+                
+                expectedMasterSequence = Eeprom.EepromData.DemoSettings.CntPacketRxOK + 1;
+                
+                // Traitement des statistiques et RSSI
+                Radio.GetPacketStatus(&PacketStatus);
+                if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
+                {
+                    Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
+                    Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
+                }
+                
+                Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
+
+                // SUPPRIMÉ : Cette ligne qui était mal placée
+                // lastWorkingCombinationIndex = currentCombinationIndex;
+                
+                if (awaitingPingAfterParamChange)
+                {
+                    awaitingPingAfterParamChange = false;
+                }
+            }
+            
+            DemoInternalState = SEND_PONG_MSG;
+            break;
                 
             // Gestion des cas d'erreur et timeout
             case APP_RX_TIMEOUT:
@@ -602,8 +624,22 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 // Incrémenter le compteur de paquets perdus (KO) côté esclave
                 Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave++;
                 Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
+
+                if (awaitingPingAfterParamChange)
+                {
+                    currentCombinationIndex = lastWorkingCombinationIndex;
+                    Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
+                    Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+                    EepromSaveSettings(RADIO_LORA_PARAMS);
+                    EepromSaveSettings(DEMO_SETTINGS);
+                    InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
+                    Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
+                    DisplayCurrentRadioParams(PAGE_PING_PONG);
+                    awaitingPingAfterParamChange = false;
+                }
+
                 DemoInternalState = APP_IDLE;
-                
+
                 // Attendre le prochain PING
                 IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
                 Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
