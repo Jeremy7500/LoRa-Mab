@@ -14,6 +14,7 @@ Maintainer: Gregory Cristian & Gilbert Menth
 #include "Menu.h"
 #include "mbed.h"
 #include <math.h>
+#include <cmath>
 #include "radio.h"
 #include "sx1280-hal.h"
 #include "Eeprom.h"
@@ -227,33 +228,223 @@ void SendNextPacketEvent( void );
 void ReceiveNextPacketEvent( void );
 uint8_t CheckDistance( void );
 
-// Structure pour définir les combinaisons SF/BW
+// Structure pour définir les combinaisons SF/BW/Power
 typedef struct {
     uint8_t sf;
     uint8_t bw;
-} SfBwCombination_t;
+    int8_t power;  // Ajout du paramètre de puissance
+} SfBwPowerCombination_t;
 
-// Liste des combinaisons SF/BW ordonnées (SF12/BW200 -> SF5/BW1600)
-static const SfBwCombination_t sfBwCombinations[] = {
-    {LORA_SF12, LORA_BW_0200},  // Index 0
-    {LORA_SF12, LORA_BW_0400},  // Index 1
-    {LORA_SF12, LORA_BW_0800},  // Index 2
-    {LORA_SF12, LORA_BW_1600},  // Index 3
-    {LORA_SF9,  LORA_BW_0200},  // Index 4
-    {LORA_SF9,  LORA_BW_0400},  // Index 5
-    {LORA_SF9,  LORA_BW_0800},  // Index 6
-    {LORA_SF9,  LORA_BW_1600},  // Index 7
-    {LORA_SF7,  LORA_BW_0200},  // Index 8
-    {LORA_SF7,  LORA_BW_0400},  // Index 9
-    {LORA_SF7,  LORA_BW_0800},  // Index 10
-    {LORA_SF7,  LORA_BW_1600},  // Index 11
-    {LORA_SF5,  LORA_BW_0200},  // Index 12
-    {LORA_SF5,  LORA_BW_0400},  // Index 13
-    {LORA_SF5,  LORA_BW_0800},  // Index 14
-    {LORA_SF5,  LORA_BW_1600}   // Index 15
+// Liste des combinaisons SF/BW/Power ordonnées (SF12/BW200/P-18 -> SF5/BW1600/P13)
+static const SfBwPowerCombination_t sfBwPowerCombinations[] = {
+    // SF12 avec les 3 puissances
+    {LORA_SF12, LORA_BW_0200, -18}, // Index 0
+    {LORA_SF12, LORA_BW_0200, 7},   // Index 1
+    {LORA_SF12, LORA_BW_0200, 13},  // Index 2
+    {LORA_SF12, LORA_BW_0400, -18}, // Index 3
+    {LORA_SF12, LORA_BW_0400, 7},   // Index 4
+    {LORA_SF12, LORA_BW_0400, 13},  // Index 5
+    {LORA_SF12, LORA_BW_0800, -18}, // Index 6
+    {LORA_SF12, LORA_BW_0800, 7},   // Index 7
+    {LORA_SF12, LORA_BW_0800, 13},  // Index 8
+    {LORA_SF12, LORA_BW_1600, -18}, // Index 9
+    {LORA_SF12, LORA_BW_1600, 7},   // Index 10
+    {LORA_SF12, LORA_BW_1600, 13},  // Index 11
+    
+    // SF9 avec les 3 puissances
+    {LORA_SF9,  LORA_BW_0200, -18}, // Index 12
+    {LORA_SF9,  LORA_BW_0200, 7},   // Index 13
+    {LORA_SF9,  LORA_BW_0200, 13},  // Index 14
+    {LORA_SF9,  LORA_BW_0400, -18}, // Index 15
+    {LORA_SF9,  LORA_BW_0400, 7},   // Index 16
+    {LORA_SF9,  LORA_BW_0400, 13},  // Index 17
+    {LORA_SF9,  LORA_BW_0800, -18}, // Index 18
+    {LORA_SF9,  LORA_BW_0800, 7},   // Index 19
+    {LORA_SF9,  LORA_BW_0800, 13},  // Index 20
+    {LORA_SF9,  LORA_BW_1600, -18}, // Index 21
+    {LORA_SF9,  LORA_BW_1600, 7},   // Index 22
+    {LORA_SF9,  LORA_BW_1600, 13},  // Index 23
+    
+    // SF7 avec les 3 puissances
+    {LORA_SF7,  LORA_BW_0200, -18}, // Index 24
+    {LORA_SF7,  LORA_BW_0200, 7},   // Index 25
+    {LORA_SF7,  LORA_BW_0200, 13},  // Index 26
+    {LORA_SF7,  LORA_BW_0400, -18}, // Index 27
+    {LORA_SF7,  LORA_BW_0400, 7},   // Index 28
+    {LORA_SF7,  LORA_BW_0400, 13},  // Index 29
+    {LORA_SF7,  LORA_BW_0800, -18}, // Index 30
+    {LORA_SF7,  LORA_BW_0800, 7},   // Index 31
+    {LORA_SF7,  LORA_BW_0800, 13},  // Index 32
+    {LORA_SF7,  LORA_BW_1600, -18}, // Index 33
+    {LORA_SF7,  LORA_BW_1600, 7},   // Index 34
+    {LORA_SF7,  LORA_BW_1600, 13},  // Index 35
+    
+    // SF5 avec les 3 puissances
+    {LORA_SF5,  LORA_BW_0200, -18}, // Index 36
+    {LORA_SF5,  LORA_BW_0200, 7},   // Index 37
+    {LORA_SF5,  LORA_BW_0200, 13},  // Index 38
+    {LORA_SF5,  LORA_BW_0400, -18}, // Index 39
+    {LORA_SF5,  LORA_BW_0400, 7},   // Index 40
+    {LORA_SF5,  LORA_BW_0400, 13},  // Index 41
+    {LORA_SF5,  LORA_BW_0800, -18}, // Index 42
+    {LORA_SF5,  LORA_BW_0800, 7},   // Index 43
+    {LORA_SF5,  LORA_BW_0800, 13},  // Index 44
+    {LORA_SF5,  LORA_BW_1600, -18}, // Index 45
+    {LORA_SF5,  LORA_BW_1600, 7},   // Index 46
+    {LORA_SF5,  LORA_BW_1600, 13}   // Index 47
 };
 
-#define SF_BW_COMBINATIONS_COUNT (sizeof(sfBwCombinations) / sizeof(SfBwCombination_t))
+#define SF_BW_POWER_COMBINATIONS_COUNT (sizeof(sfBwPowerCombinations) / sizeof(SfBwPowerCombination_t))
+
+
+// Structure pour l'algorithme UCB
+typedef struct {
+    double empiricalMean;       // Q_i(t) - récompense moyenne empirique
+    uint32_t timesSelected;     // N_i(t) - nombre de fois sélectionné
+    double ucbValue;            // Valeur UCB calculée
+    double totalReward;         // Somme totale des récompenses
+} UCBArm_t;
+
+// Variables globales UCB - MODIFICATION : Ajouter le tracking des bras défaillants
+static UCBArm_t ucbArms[SF_BW_POWER_COMBINATIONS_COUNT];
+static uint32_t totalRounds = 0;
+static const double UCB_ALPHA = 0.1;
+static const double MAX_ENERGY_COST = 1000.0;
+static const double MAX_DATA_RATE = 203125.0;
+static const double REWARD_W1 = 0.5;
+static const double REWARD_W2 = 0.5;
+
+// AJOUT : Variables pour gérer les bras défaillants
+static bool failedArms[SF_BW_POWER_COMBINATIONS_COUNT];
+static uint8_t lastKnownWorkingArm = 0;  // Dernier bras qui fonctionnait
+
+// MODIFICATION : Initialiser les bras UCB avec le tracking des échecs
+void InitializeUCBArms(void) {
+    for (int i = 0; i < SF_BW_POWER_COMBINATIONS_COUNT; i++) {
+        ucbArms[i].empiricalMean = 0.0;
+        ucbArms[i].timesSelected = 0;
+        ucbArms[i].ucbValue = 0.0;
+        ucbArms[i].totalReward = 0.0;
+        failedArms[i] = false;  // AJOUT : Aucun bras marqué comme défaillant au début
+    }
+    totalRounds = 0;
+    lastKnownWorkingArm = 0;  // AJOUT : Index 0 comme référence initiale
+}
+
+// MODIFICATION : Marquer un bras comme défaillant
+void MarkArmAsFailed(uint8_t armIndex) {
+    if (armIndex < SF_BW_POWER_COMBINATIONS_COUNT) {
+        failedArms[armIndex] = true;
+        printf("ARM %d marked as FAILED - will be excluded from UCB\r\n", armIndex);
+    }
+}
+
+// Calculer le débit de données pour une combinaison donnée
+double CalculateDataRate(uint8_t sf, uint8_t bw) {
+    double bwValue;
+    switch(bw) {
+        case LORA_BW_0200: bwValue = 203e3; break;
+        case LORA_BW_0400: bwValue = 406e3; break;
+        case LORA_BW_0800: bwValue = 812e3; break;
+        case LORA_BW_1600: bwValue = 1625e3; break;
+        default: bwValue = 203e3; break;
+    }
+    
+    uint8_t sfValue = (sf >> 4);  // Conversion du format SX1280
+    double codingRate = 4.0/5.0;  // CR = 4/5
+    
+    return (double)sfValue * (bwValue * codingRate) / pow(2.0, (double)sfValue);
+}
+
+// Calculer le coût énergétique estimé
+double CalculateEnergyCost(uint8_t sf, uint8_t bw, int8_t txPower) {
+    // Table de correspondance puissance -> courant (mA)
+    double current;
+    if (txPower <= -18) current = 6.2;
+    else if (txPower <= 7) current = 15.5;
+    else current = 24.0;  // Pour 12.5 dBm
+    
+    // Calcul du Time on Air simplifié
+    uint8_t sfValue = (sf >> 4);
+    double bwValue;
+    switch(bw) {
+        case LORA_BW_0200: bwValue = 203e3; break;
+        case LORA_BW_0400: bwValue = 406e3; break;
+        case LORA_BW_0800: bwValue = 812e3; break;
+        case LORA_BW_1600: bwValue = 1625e3; break;
+        default: bwValue = 203e3; break;
+    }
+    
+    double symbolTime = pow(2.0, (double)sfValue) / bwValue;
+    uint8_t payloadLength = 10;  // Taille du payload
+    int numerator = max((int)(8*payloadLength + 16 - 4*sfValue + 8), 0);
+    double nSymbols = 8 + 4.25 + 8 + ceil((double)numerator / (4.0*(sfValue-2))) * (4.0/5.0);
+    double timeOnAir = symbolTime * nSymbols;
+    
+    // Énergie = Courant × Tension × Temps
+    return current * 3.3 * timeOnAir * 1000;  // En mJ
+}
+
+// Calculer la récompense
+double CalculateReward(uint8_t combinationIndex, bool success) {
+    if (!success) return 0.0;
+    
+    SfBwPowerCombination_t combo = sfBwPowerCombinations[combinationIndex];
+    
+    double energyCost = CalculateEnergyCost(combo.sf, combo.bw, combo.power);
+    double dataRate = CalculateDataRate(combo.sf, combo.bw);
+    
+    // Normalisation
+    double energyEfficiency = 1.0 - (energyCost / MAX_ENERGY_COST);
+    double normalizedDataRate = dataRate / MAX_DATA_RATE;
+    
+    // Calcul de la récompense finale
+    return REWARD_W1 * energyEfficiency + REWARD_W2 * normalizedDataRate;
+}
+
+// MODIFICATION : Sélectionner le bras selon UCB en excluant les bras défaillants
+uint8_t SelectArmUCB(void) {
+    totalRounds++;
+    
+    // Phase d'exploration initiale : tester chaque bras NON DÉFAILLANT une fois
+    for (int i = 0; i < SF_BW_POWER_COMBINATIONS_COUNT; i++) {
+        if (!failedArms[i] && ucbArms[i].timesSelected == 0) {
+            return i;
+        }
+    }
+    
+    // Phase UCB : calculer les valeurs UCB et sélectionner le maximum parmi les bras NON DÉFAILLANTS
+    uint8_t bestArm = lastKnownWorkingArm;  // Par défaut, le dernier qui fonctionnait
+    double maxUCB = -1.0;
+    
+    for (int i = 0; i < SF_BW_POWER_COMBINATIONS_COUNT; i++) {
+        if (!failedArms[i]) {  // AJOUT : Exclure les bras défaillants
+            double confidenceTerm = UCB_ALPHA * sqrt(log((double)totalRounds) / (2.0 * ucbArms[i].timesSelected));
+            ucbArms[i].ucbValue = ucbArms[i].empiricalMean + confidenceTerm;
+             
+            if (ucbArms[i].ucbValue > maxUCB) {
+                maxUCB = ucbArms[i].ucbValue;
+                bestArm = i;
+            }
+        }
+    }
+    
+    return bestArm;
+}
+
+// MODIFICATION : Mettre à jour le dernier bras fonctionnel
+void UpdateLastWorkingArm(uint8_t armIndex) {
+    lastKnownWorkingArm = armIndex;
+}
+
+// Mettre à jour les statistiques UCB
+void UpdateUCBStatistics(uint8_t armIndex, double reward) {
+    ucbArms[armIndex].timesSelected++;
+    ucbArms[armIndex].totalReward += reward;
+    ucbArms[armIndex].empiricalMean = ucbArms[armIndex].totalReward / ucbArms[armIndex].timesSelected;
+}
+
+#define FIXED_CYCLE_TIME_MS     2000
 
 uint8_t RunDemoApplicationAdaptivePingPong(void)
 {
@@ -261,25 +452,39 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     static uint8_t successfulExchanges = 0;
     static bool paramChangeRequested = false;
     static bool paramChangeConfirmed = false;
-    static uint32_t lastSequenceNumberReceived = 0;
     static uint32_t expectedMasterSequence = 0;
-    static uint8_t currentCombinationIndex = 0; // Commence à SF12/BW200
+    
+    // Variables UCB
+    static uint8_t currentCombinationIndex = 0;
+    static uint8_t selectedArmIndex = 0;
+    static bool transmissionSuccess = false;
+    static bool ucbInitialized = false;
+    
+    // Variables pour la négociation de changement de paramètres - MASTER
     static uint8_t lastWorkingCombinationIndex = 0;
+    static uint8_t pendingCombinationIndex = 0;
+    static uint8_t timeoutCountAfterChange = 0;
+    static bool waitingForConfirmation = false;
+    static const uint8_t MAX_TIMEOUT_AFTER_CHANGE = 3;
+    
+    // Variables pour l'esclave - SLAVE
     static bool awaitingPingAfterParamChange = false;
+    static uint8_t lastMasterCombinationIndex = 255;
+    static bool firstPingReceived = false;
+    static uint32_t lastPingTime = 0;
+    static const uint32_t PING_TIMEOUT_MS = 10000; // 10 secondes
+    
+    const uint8_t EXCHANGES_BEFORE_UCB_UPDATE = 1;
 
-    // Constantes pour le contrôle du changement de paramètres
-    const uint8_t EXCHANGES_BEFORE_PARAM_CHANGE = 4;
-    // Format du paquet optimisé - 2 octets de contrôle:
-    // Octet 0 - Bit 0: 0 = PING, 1 = PONG
-    // Octet 0 - Bit 1: 1 = Demande ou confirmation de changement de paramètres
-    // Octet 1: Index de la combinaison SF/BW
+    // Format du paquet optimisé - 2 octets de contrôle
     const uint8_t MSG_TYPE_PING = 0x00;
     const uint8_t MSG_TYPE_PONG = 0x01;
     const uint8_t PARAM_CHANGE_BIT = 0x02;
+    const uint8_t PARAM_CONFIRM_BIT = 0x04;
 
     if (Eeprom.EepromData.DemoSettings.HoldDemo == true)
     {
-        return 0;   // quit without refresh display
+        return 0;
     }
 
     if (DemoRunning == false)
@@ -291,26 +496,45 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         ReceiveNext = false;
         SendNext = false;
         
+        InitializeUCBArms();
+
+        // FORCER l'index 0 au début pour MASTER et SLAVE
+        selectedArmIndex = 0;
+        currentCombinationIndex = 0;
+        lastWorkingCombinationIndex = 0;
+        pendingCombinationIndex = 0;
+
+        // Mettre à jour le compteur UCB pour l'index 0 comme s'il avait été sélectionné
+        totalRounds = 1;
+        ucbArms[0].timesSelected = 1;
+        UpdateLastWorkingArm(0);  // AJOUT : Marquer l'index 0 comme dernier fonctionnel
+
+        printf("STARTING: Both Master and Slave forced to start with index 0\r\n");
+
         // Initialiser les compteurs et variables
         Eeprom.EepromData.DemoSettings.CntPacketTx = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxOK = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxKO = 0;
         Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave = 0;
         Eeprom.EepromData.DemoSettings.RxTimeOutCount = 0;
-        lastSequenceNumberReceived = 0;
         expectedMasterSequence = 0;
         
         // Réinitialiser les variables pour l'adaptation des paramètres
         successfulExchanges = 0;
         paramChangeRequested = false;
         paramChangeConfirmed = false;
-        currentCombinationIndex = 0; // Commence à SF12/BW200
-        lastWorkingCombinationIndex = 0;
+        transmissionSuccess = false;
+        waitingForConfirmation = false;
+        timeoutCountAfterChange = 0;
+        lastMasterCombinationIndex = 255;
+        firstPingReceived = false;
         awaitingPingAfterParamChange = false;
+        lastPingTime = 0;
         
-        // Appliquer la combinaison initiale SF12/BW200
-        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
-        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+        // Appliquer FORCÉMENT l'index 0 (première combinaison SF12/BW200/P-18)
+        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwPowerCombinations[0].sf;
+        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwPowerCombinations[0].bw;
+        Eeprom.EepromData.DemoSettings.TxPower = sfBwPowerCombinations[0].power;
 
         // Sauvegarder et appliquer les nouveaux paramètres
         EepromSaveSettings(RADIO_LORA_PARAMS);
@@ -325,7 +549,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
         if (Eeprom.EepromData.DemoSettings.Entity == MASTER)
         {
             DemoInternalState = SEND_PING_MSG;
-            SendNextPacket.attach_us(&SendNextPacketEvent, ((uint32_t)((Eeprom.EepromData.DemoSettings.TimeOnAir * 2) + RX_TX_INTER_PACKET_DELAY * 2) * 1000));
+            SendNextPacket.attach_us(&SendNextPacketEvent, FIXED_CYCLE_TIME_MS * 1000);
         }
         else
         {
@@ -339,7 +563,7 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
 
     Radio.ProcessIrqs();
 
-    // Logique pour le MAÎTRE
+    // Logique pour le MAÎTRE avec négociation robuste
     if (Eeprom.EepromData.DemoSettings.Entity == MASTER)
     {
         switch (DemoInternalState)
@@ -349,29 +573,71 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 {
                     SendNext = false;
                     DemoInternalState = APP_IDLE;
-                    Eeprom.EepromData.DemoSettings.CntPacketTx++; // Uniquement pour l'affichage
+                    Eeprom.EepromData.DemoSettings.CntPacketTx++;
                     
-                    // Premier octet = octet de contrôle
-                    Buffer[0] = MSG_TYPE_PING; // PING
+                    bool paramChangeNeeded = false;
                     
-                    // Si un changement de paramètres est demandé, ajouter un bit dans l'octet de contrôle
-                    if (paramChangeRequested && !paramChangeConfirmed)
+                    // CORRECTION : Logique UCB - SEULEMENT après 4 échanges réussis ET pas en attente
+                    if (!waitingForConfirmation && successfulExchanges >= EXCHANGES_BEFORE_UCB_UPDATE)
+                    {
+                        printf("MASTER: 4 successful exchanges completed - running UCB\r\n");
+                        
+                        // Calculer la récompense pour le bras actuel
+                        double reward = CalculateReward(selectedArmIndex, transmissionSuccess);
+                        printf("MASTER: Reward for arm %d: %.3f\r\n", selectedArmIndex, reward);
+                        
+                        // Mettre à jour les statistiques UCB
+                        UpdateUCBStatistics(selectedArmIndex, reward);
+                        
+                        // Sélectionner le prochain bras
+                        uint8_t newSelectedArmIndex = SelectArmUCB();
+                        
+                        // Si le bras a changé, DEMANDER le changement
+                        if (newSelectedArmIndex != selectedArmIndex)
+                        {
+                            printf("MASTER: UCB requests new arm: %d -> %d - SENDING REQUEST\r\n", 
+                                   selectedArmIndex, newSelectedArmIndex);
+                            
+                            // Sauvegarder la config actuelle qui fonctionne
+                            lastWorkingCombinationIndex = currentCombinationIndex;
+                            
+                            // Préparer la demande de changement
+                            pendingCombinationIndex = newSelectedArmIndex;
+                            paramChangeNeeded = true;
+                            waitingForConfirmation = true;
+                            timeoutCountAfterChange = 0;
+                        }
+                        else
+                        {
+                            printf("MASTER: UCB keeps current arm %d\r\n", selectedArmIndex);
+                        }
+                        
+                        // Réinitialiser les compteurs pour le prochain cycle
+                        successfulExchanges = 0;
+                    }
+                    
+                    // Construire le paquet PING
+                    Buffer[0] = MSG_TYPE_PING;
+                    if (paramChangeNeeded)
                     {
                         Buffer[0] |= PARAM_CHANGE_BIT;
-                        Buffer[1] = currentCombinationIndex + 1; // Index de la nouvelle combinaison
+                        Buffer[1] = pendingCombinationIndex; // DEMANDE de changement
+                        printf("MASTER: REQUESTING parameter change to index %d (PARAM_CHANGE_BIT set)\r\n", pendingCombinationIndex);
                     }
                     else
                     {
                         Buffer[1] = currentCombinationIndex; // Index actuel
+                        printf("MASTER: Normal PING with current index %d (successful_exchanges: %d)\r\n", 
+                               currentCombinationIndex, successfulExchanges);
                     }
                     
-                    // À partir de l'octet 2, remplir avec des données utiles
+                    // Remplir le reste du paquet
                     for (uint8_t i = 2; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
                     {
                         Buffer[i] = i; // Données de test
                     }
                     
-                    // Envoyer le paquet
+                    // Envoyer le paquet (toujours avec les paramètres actuels)
                     TX_LED = !TX_LED;
                     IrqMask = IRQ_TX_DONE | IRQ_RX_TX_TIMEOUT;
                     Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
@@ -396,43 +662,62 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
                 Radio.GetPacketStatus(&PacketStatus);
                 
-                // Vérifier si le message est un PONG
+                // Vérifier si le message est un PONG valide
                 if (BufferSize > 1 && (Buffer[0] & MSG_TYPE_PONG))
                 {
-                    // Vérifier la confirmation de changement de paramètres dans l'octet de contrôle
-                    if (Buffer[0] & PARAM_CHANGE_BIT)
+                    transmissionSuccess = true;
+                    
+                    // CORRECTION : Vérifier si c'est une CONFIRMATION de changement de paramètres
+                    if (waitingForConfirmation && (Buffer[0] & PARAM_CONFIRM_BIT))
                     {
-                        paramChangeConfirmed = true;
+                        uint8_t confirmedIndex = Buffer[1];
                         
-                        // Passer à la combinaison suivante
-                        if (currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
+                        if (confirmedIndex == pendingCombinationIndex)
                         {
-                            currentCombinationIndex++;
+                            printf("MASTER: Slave CONFIRMED parameter change to index %d - APPLYING NOW\r\n", confirmedIndex);
                             
-                            // Appliquer la nouvelle combinaison SF/BW
-                            Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
-                            Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+                            // APPLIQUER les nouveaux paramètres APRÈS confirmation
+                            currentCombinationIndex = pendingCombinationIndex;
+                            selectedArmIndex = pendingCombinationIndex;
+
+                            UpdateLastWorkingArm(currentCombinationIndex);
                             
-                            // Sauvegarder et appliquer les nouveaux paramètres
+                            Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwPowerCombinations[currentCombinationIndex].sf;
+                            Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwPowerCombinations[currentCombinationIndex].bw;
+                            Eeprom.EepromData.DemoSettings.TxPower = sfBwPowerCombinations[currentCombinationIndex].power;
+                            
                             EepromSaveSettings(RADIO_LORA_PARAMS);
                             EepromSaveSettings(DEMO_SETTINGS);
-                            
-                            // Réinitialiser les paramètres radio avec la nouvelle combinaison
                             InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
-                            Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
-
-                            // Mettre à jour le timer avec la nouvelle valeur TimeOnAir
-                            SendNextPacket.detach();
-                            SendNextPacket.attach_us(&SendNextPacketEvent, ((uint32_t)((Eeprom.EepromData.DemoSettings.TimeOnAir * 2) + 
-                                                  RX_TX_INTER_PACKET_DELAY * 2) * 1000));
+                            //Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
                             
-                            // Mettre à jour l'affichage
+                            //SendNextPacket.detach();
+                            //SendNextPacket.attach_us(&SendNextPacketEvent, ((uint32_t)((Eeprom.EepromData.DemoSettings.TimeOnAir * 2) + 
+                                                 // RX_TX_INTER_PACKET_DELAY * 2) * 1000));
+                            
                             DisplayCurrentRadioParams(PAGE_PING_PONG);
+                            
+                            printf("MASTER: New params applied - SF: %d, BW: %d, Power: %d\r\n", 
+                                   (sfBwPowerCombinations[currentCombinationIndex].sf >> 4),
+                                   sfBwPowerCombinations[currentCombinationIndex].bw,
+                                   sfBwPowerCombinations[currentCombinationIndex].power);
+                            
+                            waitingForConfirmation = false;
+                            timeoutCountAfterChange = 0;
                         }
-                        
-                        // Réinitialiser les compteurs d'échanges
-                        successfulExchanges = 0;
-                        paramChangeRequested = false;
+                        else
+                        {
+                            printf("MASTER: Slave confirmed wrong index %d (expected %d)\r\n", 
+                                   confirmedIndex, pendingCombinationIndex);
+                        }
+                    }
+                    else if (!waitingForConfirmation)
+                    {
+                        // PING-PONG normal - compter les échanges réussis
+                        printf("MASTER: Normal PONG received (successful_exchanges: %d -> %d)\r\n", 
+                               successfulExchanges, successfulExchanges + 1);
+
+                            UpdateLastWorkingArm(currentCombinationIndex);
                     }
                     
                     // Traitement des statistiques et RSSI
@@ -442,18 +727,17 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                         Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
                     }
                     
-                    // Incrémenter le compteur d'échanges réussis
-                    successfulExchanges++;
-                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
-                    
-                    // Vérifier si on doit demander un changement de paramètres
-                    if (successfulExchanges >= EXCHANGES_BEFORE_PARAM_CHANGE && 
-                        !paramChangeRequested && 
-                        currentCombinationIndex < (SF_BW_COMBINATIONS_COUNT - 1))
+                    // CORRECTION : Incrémenter seulement si pas en attente de confirmation
+                    if (!waitingForConfirmation)
                     {
-                        paramChangeRequested = true;
-                        paramChangeConfirmed = false;
+                        successfulExchanges++;
                     }
+                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
+                }
+                else
+                {
+                    transmissionSuccess = false;
+                    printf("MASTER: Invalid PONG received\r\n");
                 }
                 
                 DemoInternalState = SEND_PING_MSG;
@@ -465,34 +749,123 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
             case APP_RX_ERROR:
                 Radio.SetStandby(STDBY_RC);
                 RX_LED = !RX_LED;
-                // Incrémenter le compteur de paquets perdus (KO)
-                Eeprom.EepromData.DemoSettings.CntPacketRxKO++;
                 Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
+                
+                transmissionSuccess = false;
+                
+                // GESTION TIMEOUT APRÈS DEMANDE DE CHANGEMENT DE PARAMÈTRES
+                if (waitingForConfirmation)
+                {
+                    timeoutCountAfterChange++;
+                    printf("MASTER: Timeout after param change request (%d/%d)\r\n", 
+                           timeoutCountAfterChange, MAX_TIMEOUT_AFTER_CHANGE);
+                    
+                    if (timeoutCountAfterChange >= MAX_TIMEOUT_AFTER_CHANGE)
+                    {
+                        printf("MASTER: Too many timeouts - REVERTING to last working arm %d and marking %d as FAILED\r\n", 
+                               lastWorkingCombinationIndex, pendingCombinationIndex);
+                        
+                        // MARQUER LE BRAS DÉFAILLANT
+                        MarkArmAsFailed(pendingCombinationIndex);
+                        
+                        // RETOURNER AU DERNIER BRAS FONCTIONNEL
+                        currentCombinationIndex = lastWorkingCombinationIndex;
+                        selectedArmIndex = lastWorkingCombinationIndex;
+                        
+                        // APPLIQUER les paramètres du dernier bras fonctionnel
+                        Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwPowerCombinations[currentCombinationIndex].sf;
+                        Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwPowerCombinations[currentCombinationIndex].bw;
+                        Eeprom.EepromData.DemoSettings.TxPower = sfBwPowerCombinations[currentCombinationIndex].power;
+                        
+                        EepromSaveSettings(RADIO_LORA_PARAMS);
+                        EepromSaveSettings(DEMO_SETTINGS);
+                        InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
+                        DisplayCurrentRadioParams(PAGE_PING_PONG);
+                        
+                        printf("MASTER: Reverted to working arm %d - SF: %d, BW: %d, Power: %d\r\n", 
+                               currentCombinationIndex,
+                               (sfBwPowerCombinations[currentCombinationIndex].sf >> 4),
+                               sfBwPowerCombinations[currentCombinationIndex].bw,
+                               sfBwPowerCombinations[currentCombinationIndex].power);
+                        
+                        waitingForConfirmation = false;
+                        timeoutCountAfterChange = 0;
+                        pendingCombinationIndex = currentCombinationIndex; // Reset
+                    }
+                }
+                else
+                {
+                    // Timeout normal - ne pas compter dans les échanges réussis
+                    printf("MASTER: Normal timeout\r\n");
+                }
+                
                 DemoInternalState = SEND_PING_MSG;
                 refreshDisplay = 1;
                 break;
         }
     }
-    // Logique pour l'ESCLAVE
+    // Logique pour l'ESCLAVE avec négociation robuste
     else
     {
+        // Vérifier le timeout de PING (si pas reçu depuis 10 secondes)
+        if (awaitingPingAfterParamChange && lastPingTime > 0)
+        {
+            uint32_t currentTime = us_ticker_read() / 1000; // Convertir en ms
+            if ((currentTime - lastPingTime) > PING_TIMEOUT_MS)
+            {
+                printf("SLAVE: Ping timeout after param change - REVERTING to last working arm %d\r\n", 
+                       lastKnownWorkingArm);
+                
+                // MODIFICATION : Retourner au dernier bras fonctionnel connu
+                currentCombinationIndex = lastKnownWorkingArm;
+                
+                // Appliquer les paramètres du dernier bras fonctionnel
+                Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwPowerCombinations[currentCombinationIndex].sf;
+                Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwPowerCombinations[currentCombinationIndex].bw;
+                Eeprom.EepromData.DemoSettings.TxPower = sfBwPowerCombinations[currentCombinationIndex].power;
+                
+                EepromSaveSettings(RADIO_LORA_PARAMS);
+                EepromSaveSettings(DEMO_SETTINGS);
+                InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
+                DisplayCurrentRadioParams(PAGE_PING_PONG);
+                
+                printf("SLAVE: Reverted to working arm %d - SF: %d, BW: %d, Power: %d\r\n", 
+                       currentCombinationIndex,
+                       (sfBwPowerCombinations[currentCombinationIndex].sf >> 4),
+                       sfBwPowerCombinations[currentCombinationIndex].bw,
+                       sfBwPowerCombinations[currentCombinationIndex].power);
+                
+                awaitingPingAfterParamChange = false;
+                
+                // Repasser en écoute continue avec les paramètres restaurés
+                IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
+                Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
+                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000}); // Écoute continue
+                DemoInternalState = APP_IDLE;
+            }
+        }
+        
         switch (DemoInternalState)
         {
             case SEND_PONG_MSG:
-                wait_ms(2);
                 DemoInternalState = APP_IDLE;
                 
-                // Premier octet = octet de contrôle
-                Buffer[0] = MSG_TYPE_PONG; // PONG
-                
-                // Si un changement de paramètres a été demandé par le maître, confirmer
-                if (paramChangeRequested)
+                // CORRECTION : Construire le PONG avec confirmation si nécessaire
+                Buffer[0] = MSG_TYPE_PONG;
+                if (paramChangeConfirmed)
                 {
-                    Buffer[0] |= PARAM_CHANGE_BIT;
+                    Buffer[0] |= PARAM_CONFIRM_BIT; // CONFIRMER le changement
+                    Buffer[1] = currentCombinationIndex; // Index que je vais appliquer
+                    printf("SLAVE: Sending PONG with CONFIRMATION for index %d\r\n", currentCombinationIndex);
+                    paramChangeConfirmed = false; // Reset du flag
                 }
-                Buffer[1] = currentCombinationIndex; // Index actuel
+                else
+                {
+                    Buffer[1] = currentCombinationIndex; // Index actuel normal
+                    printf("SLAVE: Sending normal PONG with index %d\r\n", currentCombinationIndex);
+                }
                 
-                // À partir de l'octet 2, remplir avec des données utiles
+                // Remplir le reste du paquet
                 for (uint8_t i = 2; i < Eeprom.EepromData.DemoSettings.PayloadLength; i++)
                 {
                     Buffer[i] = i + 0x80; // Données différentes du master
@@ -508,27 +881,32 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 break;
                 
             case APP_TX:
-                // Si un changement de paramètres a été confirmé, l'appliquer
-                if (paramChangeConfirmed)
+                // Appliquer les paramètres APRÈS avoir envoyé le PONG de confirmation
+                if (paramChangeRequested)
                 {
-                    // Appliquer la nouvelle combinaison SF/BW
-                    Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
-                    Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
+                    printf("SLAVE: Applying new params AFTER sending confirmation PONG\r\n");
+                    
+                    // Appliquer la nouvelle combinaison SF/BW/Power
+                    Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwPowerCombinations[currentCombinationIndex].sf;
+                    Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwPowerCombinations[currentCombinationIndex].bw;
+                    Eeprom.EepromData.DemoSettings.TxPower = sfBwPowerCombinations[currentCombinationIndex].power;
 
-                    // Sauvegarder et appliquer les nouveaux paramètres
                     EepromSaveSettings(RADIO_LORA_PARAMS);
                     EepromSaveSettings(DEMO_SETTINGS);
-
-                    // Réinitialiser les paramètres radio avec la nouvelle combinaison
                     InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
-                    Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
-
-                    // Mettre à jour l'affichage
                     DisplayCurrentRadioParams(PAGE_PING_PONG);
-
+                    
+                    // AJOUT : Mettre à jour le dernier bras fonctionnel
+                    UpdateLastWorkingArm(currentCombinationIndex);
+                    
+                    printf("SLAVE: New params applied - SF: %d, BW: %d, Power: %d\r\n", 
+                           (sfBwPowerCombinations[currentCombinationIndex].sf >> 4),
+                           sfBwPowerCombinations[currentCombinationIndex].bw,
+                           sfBwPowerCombinations[currentCombinationIndex].power);
+                    
                     paramChangeRequested = false;
-                    paramChangeConfirmed = false;
                     awaitingPingAfterParamChange = true;
+                    lastPingTime = us_ticker_read() / 1000; // Reset du timer
                 }
 
                 // Configuration pour recevoir le prochain PING
@@ -537,113 +915,128 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
                 TX_LED = !TX_LED;
                 IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
                 Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
+                
                 if (awaitingPingAfterParamChange)
                 {
-                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 2000});
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 5000}); // 5 secondes
                 }
                 else
                 {
-                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000});
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000}); // Écoute continue
                 }
                 refreshDisplay = 1;
                 break;
                 
             case APP_RX:
-            // Traitement de la réception du PING
-            DemoInternalState = APP_IDLE;
-            RX_LED = !RX_LED;
-            Radio.SetStandby(STDBY_RC);
-            
-            // Lire le paquet
-            Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
-            
-            // Vérifier si le message est un PING et s'il y a une demande de changement de paramètres
-            if (BufferSize > 1 && !(Buffer[0] & MSG_TYPE_PONG))
-            {
-                // Vérifier la demande de changement de paramètres dans l'octet de contrôle
-                if (Buffer[0] & PARAM_CHANGE_BIT)
+                // Traitement de la réception du PING
+                DemoInternalState = APP_IDLE;
+                RX_LED = !RX_LED;
+                Radio.SetStandby(STDBY_RC);
+                
+                // Mettre à jour le timestamp de réception
+                lastPingTime = us_ticker_read() / 1000;
+                
+                // Lire le paquet
+                Radio.GetPayload(Buffer, &BufferSize, BUFFER_SIZE);
+                
+                // Vérifier si le message est un PING valide
+                if (BufferSize >= 2 && !(Buffer[0] & MSG_TYPE_PONG))
                 {
-                    uint8_t newCombinationIndex = Buffer[1];
-                    if (newCombinationIndex < SF_BW_COMBINATIONS_COUNT)
+                    uint8_t receivedCombinationIndex = Buffer[1];
+                    bool paramChangeRequestedByMaster = (Buffer[0] & PARAM_CHANGE_BIT) != 0;
+                    
+                    printf("SLAVE: Received PING with index %d (current: %d, change_req: %d)\r\n", 
+                           receivedCombinationIndex, currentCombinationIndex, paramChangeRequestedByMaster);
+                    
+                    // Initialisation au premier PING
+                    if (!firstPingReceived)
                     {
-                        // CORRECTION : Sauvegarder l'index actuel AVANT de le changer
-                        lastWorkingCombinationIndex = currentCombinationIndex;
-                        currentCombinationIndex = newCombinationIndex;
-                        paramChangeRequested = true;
-                        paramChangeConfirmed = true;
+                        firstPingReceived = true;
+                        lastMasterCombinationIndex = receivedCombinationIndex;
+                        currentCombinationIndex = receivedCombinationIndex;
+                        // AJOUT : Initialiser le dernier bras fonctionnel
+                        UpdateLastWorkingArm(receivedCombinationIndex);
+                        awaitingPingAfterParamChange = false;
+                        
+                        printf("SLAVE: First PING - initialized with index %d\r\n", receivedCombinationIndex);
                     }
+                    // Traitement d'une DEMANDE EXPLICITE de changement de paramètres
+                    else if (paramChangeRequestedByMaster && receivedCombinationIndex != currentCombinationIndex)
+                    {
+                        printf("SLAVE: Parameter change EXPLICITLY REQUESTED: %d -> %d - PREPARING CHANGE\r\n", 
+                               currentCombinationIndex, receivedCombinationIndex);
+                        
+                        // PRÉPARER le changement (mais ne pas l'appliquer encore)
+                        currentCombinationIndex = receivedCombinationIndex;
+                        lastMasterCombinationIndex = receivedCombinationIndex;
+                        
+                        // Marquer pour confirmer dans le PONG ET appliquer après
+                        paramChangeConfirmed = true;
+                        paramChangeRequested = true;
+                        awaitingPingAfterParamChange = false; // Reset
+                    }
+                    else if (paramChangeRequestedByMaster && receivedCombinationIndex == currentCombinationIndex)
+                    {
+                        printf("SLAVE: Master requested same index %d - ignoring\r\n", receivedCombinationIndex);
+                        awaitingPingAfterParamChange = false;
+                    }
+                    else if (!paramChangeRequestedByMaster && receivedCombinationIndex != currentCombinationIndex)
+                    {
+                        printf("SLAVE: Index mismatch WITHOUT explicit request (master: %d, slave: %d) - IGNORING\r\n", 
+                               receivedCombinationIndex, currentCombinationIndex);
+                        // NE PAS CHANGER - attendre demande explicite
+                        awaitingPingAfterParamChange = false;
+                    }
+                    else
+                    {
+                        // PING normal - même index, pas de demande
+                        printf("SLAVE: Normal PING - index %d confirmed\r\n", receivedCombinationIndex);
+                        awaitingPingAfterParamChange = false;
+                        
+                        // AJOUT : Mettre à jour le dernier bras fonctionnel en cas de succès
+                        UpdateLastWorkingArm(currentCombinationIndex);
+                    }
+                    
+                    // Traitement des statistiques et RSSI
+                    Radio.GetPacketStatus(&PacketStatus);
+                    if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
+                    {
+                        Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
+                        Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
+                    }
+                    
+                    Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
                 }
                 else
                 {
-                    // AJOUT : Si pas de changement de paramètres demandé, 
-                    // mettre à jour lastWorkingCombinationIndex car la communication fonctionne
-                    lastWorkingCombinationIndex = currentCombinationIndex;
+                    printf("SLAVE: Invalid PING received (size: %d)\r\n", BufferSize);
                 }
                 
-                // Détection des paquets perdus côté esclave
-                // En se basant sur la séquence attendue
-                if (expectedMasterSequence > 0 && 
-                    Eeprom.EepromData.DemoSettings.CntPacketRxOK != expectedMasterSequence)
-                {
-                    // Calculer combien de paquets ont été perdus
-                    uint32_t missedPackets = expectedMasterSequence - Eeprom.EepromData.DemoSettings.CntPacketRxOK;
-                    if (missedPackets > 0 && missedPackets < 100) // Valeur raisonnable pour éviter les incohérences
-                    {
-                        Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave += missedPackets;
-                    }
-                }
-                
-                expectedMasterSequence = Eeprom.EepromData.DemoSettings.CntPacketRxOK + 1;
-                
-                // Traitement des statistiques et RSSI
-                Radio.GetPacketStatus(&PacketStatus);
-                if (Eeprom.EepromData.ModulationParams.PacketType == PACKET_TYPE_LORA)
-                {
-                    Eeprom.EepromData.DemoSettings.RssiValue = PacketStatus.LoRa.RssiPkt;
-                    Eeprom.EepromData.DemoSettings.SnrValue = PacketStatus.LoRa.SnrPkt;
-                }
-                
-                Eeprom.EepromData.DemoSettings.CntPacketRxOK++;
-
-                // SUPPRIMÉ : Cette ligne qui était mal placée
-                // lastWorkingCombinationIndex = currentCombinationIndex;
-                
-                if (awaitingPingAfterParamChange)
-                {
-                    awaitingPingAfterParamChange = false;
-                }
-            }
-            
-            DemoInternalState = SEND_PONG_MSG;
-            break;
+                DemoInternalState = SEND_PONG_MSG;
+                break;
                 
             // Gestion des cas d'erreur et timeout
             case APP_RX_TIMEOUT:
             case APP_RX_ERROR:
                 Radio.SetStandby(STDBY_RC);
-                // Incrémenter le compteur de paquets perdus (KO) côté esclave
                 Eeprom.EepromData.DemoSettings.CntPacketRxKOSlave++;
                 Eeprom.EepromData.DemoSettings.RxTimeOutCount++;
 
-                if (awaitingPingAfterParamChange)
-                {
-                    currentCombinationIndex = lastWorkingCombinationIndex;
-                    Eeprom.EepromData.DemoSettings.ModulationParam1 = sfBwCombinations[currentCombinationIndex].sf;
-                    Eeprom.EepromData.DemoSettings.ModulationParam2 = sfBwCombinations[currentCombinationIndex].bw;
-                    EepromSaveSettings(RADIO_LORA_PARAMS);
-                    EepromSaveSettings(DEMO_SETTINGS);
-                    InitializeDemoParameters(Eeprom.EepromData.DemoSettings.ModulationType);
-                    Eeprom.EepromData.DemoSettings.TimeOnAir = GetTimeOnAir(Eeprom.EepromData.DemoSettings.ModulationType);
-                    DisplayCurrentRadioParams(PAGE_PING_PONG);
-                    awaitingPingAfterParamChange = false;
-                }
+                printf("SLAVE: RX Timeout/Error\r\n");
 
                 DemoInternalState = APP_IDLE;
 
                 // Attendre le prochain PING
                 IrqMask = IRQ_RX_DONE | IRQ_CRC_ERROR | IRQ_RX_TX_TIMEOUT;
                 Radio.SetDioIrqParams(IrqMask, IrqMask, IRQ_RADIO_NONE, IRQ_RADIO_NONE);
-                Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000});
+                if (awaitingPingAfterParamChange)
+                {
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 5000}); // 5 secondes
+                }
+                else
+                {
+                    Radio.SetRx((TickTime_t){RX_TIMEOUT_TICK_SIZE, 0x0000}); // Écoute continue
+                }
                 refreshDisplay = 1;
                 break;
         }
@@ -651,6 +1044,8 @@ uint8_t RunDemoApplicationAdaptivePingPong(void)
     
     return refreshDisplay;
 }
+
+
 // **************************     RF Test Demo    ******************************
 // *                                                                           *
 // *                                                                           *
